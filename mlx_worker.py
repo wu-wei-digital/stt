@@ -25,6 +25,33 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None or v.strip() == "":
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float_opt(name: str, default: float | None) -> float | None:
+    v = os.environ.get(name)
+    if v is None or v.strip() == "":
+        return default
+    try:
+        return float(v)
+    except ValueError:
+        return default
+
+
+# Repetition-loop guards (tunable via env).
+#   condition_on_previous_text=False stops a hallucinated token feeding back into
+#   itself, which is the main cause of "word word word ..." loops in dictation.
+#   hallucination_silence_threshold only takes effect with word_timestamps=True
+#   (an alignment pass), so it is OFF by default to avoid adding cost to every
+#   clip; set STT_HALLUCINATION_SILENCE_THRESHOLD to a number of seconds to enable.
+_CONDITION_ON_PREVIOUS_TEXT = _env_bool("STT_CONDITION_ON_PREVIOUS_TEXT", False)
+_HALLUCINATION_SILENCE_THRESHOLD = _env_float_opt("STT_HALLUCINATION_SILENCE_THRESHOLD", None)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="STT MLX Whisper worker")
     parser.add_argument("--model", required=True, help="HF repo or local path for MLX Whisper model")
@@ -74,11 +101,18 @@ def main() -> int:
         prompt = message.get("prompt") or None
 
         try:
+            extra: dict[str, Any] = {}
+            if _HALLUCINATION_SILENCE_THRESHOLD is not None:
+                # The silence threshold needs word timestamps to do anything.
+                extra["word_timestamps"] = True
+                extra["hallucination_silence_threshold"] = _HALLUCINATION_SILENCE_THRESHOLD
             result = mlx_whisper.transcribe(
                 audio_file_path,
                 path_or_hf_repo=model,
                 language=language,
                 initial_prompt=prompt,
+                condition_on_previous_text=_CONDITION_ON_PREVIOUS_TEXT,
+                **extra,
             )
             text = (result.get("text") or "").strip()
             _write_json({"type": "result", "id": req_id, "text": text, "error": None})

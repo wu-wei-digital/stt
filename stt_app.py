@@ -11,6 +11,7 @@ from typing import Callable, Optional
 
 from audio_worker_client import AudioWorkerClient
 from issue_capture import maybe_capture_mlx_issue
+from postprocess import collapse_repeats
 from providers import get_provider
 from recordings import DEFAULT_RECORDINGS_DIR, DEFAULT_RECORDINGS_MAX_BYTES, archive_recording
 from stt_defaults import HOTKEY_DISPLAY_NAMES, NullOverlay, noop_sound, noop_text_injector
@@ -28,7 +29,11 @@ class AppState(Enum):
     TRANSCRIBING = "transcribing"
 
 class STTApp:
-    _MAX_STARTING_TIME_S = 5
+    # How long stop_recording waits for an in-flight start before giving up and
+    # restarting the worker. Must exceed the client's start retry budget
+    # (STT_START_ATTEMPTS x backoff) so a key release mid-retry doesn't abort a
+    # recovery that is about to succeed. Tunable via env.
+    _MAX_STARTING_TIME_S = float(os.environ.get("STT_MAX_STARTING_TIME_S", "9"))
 
     def __init__(
         self,
@@ -295,6 +300,7 @@ class STTApp:
     def transform_text(self, text: str) -> str:
         """Apply text transformations."""
         text = re.sub(r"^[Ss]lash\s+", "/", text)
+        text = collapse_repeats(text)  # drop Whisper repetition loops (all providers)
         return text
 
     def type_text(self, text: str, send_enter: bool = False) -> None:

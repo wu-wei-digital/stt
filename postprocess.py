@@ -16,6 +16,45 @@ from itertools import product
 from metaphone import doublemetaphone
 
 
+def collapse_repeats(text: str, max_repeats: int = 3) -> str:
+    """Collapse a Whisper repetition loop down to a single occurrence.
+
+    Whisper sometimes gets stuck and emits the same word or short phrase dozens
+    of times ("the cat the cat the cat ..."). A unit (one or two words) repeated
+    more than ``max_repeats`` times in a row is almost certainly a hallucination
+    loop, not real speech, so we keep one copy and drop the rest. Comparison is
+    case-insensitive; genuine short repeats (e.g. "no no") stay untouched because
+    they fall under the threshold.
+    """
+    if not text:
+        return text
+
+    tokens = text.split()
+    for unit in (1, 2):
+        out: list[str] = []
+        i = 0
+        n = len(tokens)
+        while i < n:
+            chunk = tokens[i : i + unit]
+            if len(chunk) < unit:
+                out.extend(tokens[i:])
+                break
+            lowered = [t.lower() for t in chunk]
+            reps = 1
+            j = i + unit
+            while j + unit <= n and [t.lower() for t in tokens[j : j + unit]] == lowered:
+                reps += 1
+                j += unit
+            if reps > max_repeats:
+                out.extend(chunk)  # collapse the loop to one occurrence
+            else:
+                out.extend(tokens[i:j])  # not a loop, keep verbatim
+            i = j
+        tokens = out
+
+    return " ".join(tokens)
+
+
 def levenshtein_distance(s1: str, s2: str) -> int:
     """Calculate Levenshtein edit distance between two strings."""
     if len(s1) < len(s2):

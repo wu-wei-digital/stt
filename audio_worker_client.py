@@ -22,6 +22,14 @@ class AudioWorkerClient:
     _WRITE_TIMEOUT_S = 2.0
     _WRITE_LOCK_TIMEOUT_S = 2.0
 
+    # After a recording whose stream-close hung, the worker force-exits and the
+    # macOS CoreAudio input device stays busy for a beat. The next recording
+    # then has to cold-start a stream on a still-busy device and drops out (the
+    # "works every second time" symptom). Retry start on a fresh worker with a
+    # growing backoff so the device has time to release. Tunable via env.
+    _START_ATTEMPTS = max(1, int(os.environ.get("STT_START_ATTEMPTS", "4")))
+    _START_BACKOFF_S = max(0.0, float(os.environ.get("STT_START_BACKOFF_S", "0.4")))
+
     def __init__(self):
         self._proc: subprocess.Popen[str] | None = None
         self._messages: "queue.Queue[dict[str, Any]]" = queue.Queue()
@@ -51,7 +59,8 @@ class AudioWorkerClient:
     def start_recording(self, *, device_name: str | None, sample_rate: int, channels: int) -> None:
         with self._lock:
             last_error: Exception | None = None
-            for attempt in range(2):
+            attempts = self._START_ATTEMPTS
+            for attempt in range(attempts):
                 try:
                     self._ensure_running_locked()
                     req_id = self._next_id
@@ -85,7 +94,16 @@ class AudioWorkerClient:
                 except Exception as e:
                     last_error = e
                     self._stop_locked(force=True)
-                    if attempt == 0:
+                    if attempt < attempts - 1:
+                        backoff = self._START_BACKOFF_S * (attempt + 1)
+                        print(
+                            f"[stt:audio-worker-client] start attempt {attempt + 1}/{attempts} "
+                            f"failed ({e}); retrying in {backoff:.1f}s",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        if backoff > 0:
+                            time.sleep(backoff)
                         continue
                     raise
             if last_error:
