@@ -38,6 +38,10 @@ WAVEFORM_INTERVAL_S = 0.033  # ~30fps
 PEAK_WINDOW_SIZE = 90  # ~3 seconds rolling window for peak normalization
 WAVEFORM_MAX_CHUNKS = 64  # cap to avoid unbounded growth if reader stalls
 START_TIMEOUT_S = 2.0
+# A wedged CoreAudio device can open a stream that never delivers frames (the
+# "frozen grey waveform" hang). If no frame arrives within this window after the
+# stream opens, treat the start as failed so the client recycles the worker.
+FIRST_FRAME_TIMEOUT_S = float(os.environ.get("STT_FIRST_FRAME_TIMEOUT_S", "1.0"))
 
 
 class Recorder:
@@ -121,6 +125,24 @@ class Recorder:
             raise RuntimeError("Audio stream failed to start")
 
         self._stream = stream
+
+        # First-frame watchdog: the stream opened without error, but a wedged
+        # device may never fire the callback. Wait for real frames; if none
+        # arrive, fail loudly so the client retry/backoff recycles the worker on
+        # a fresh device instead of the session hanging on a frozen waveform.
+        # (Even silence delivers frames, so zero frames means a dead stream.)
+        deadline = time.time() + FIRST_FRAME_TIMEOUT_S
+        while time.time() < deadline:
+            if self._chunks:
+                break
+            time.sleep(0.02)
+        else:
+            self._recording = False
+            self._force_exit = True
+            self._stream = None
+            self._close_stream_async(stream)
+            raise RuntimeError("Audio stream opened but delivered no frames")
+
         self._start_waveform_thread()
 
     def _resolve_device(self, name: str, sd) -> int | None:
