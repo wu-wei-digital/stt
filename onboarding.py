@@ -274,6 +274,7 @@ HOTKEYS = [
     ("alt_l", "Left Option"),
     ("ctrl_r", "Right Control"),
     ("shift_r", "Right Shift"),
+    ("ctrl_shift_alt", "Control+Shift+Option chord (⌃⇧⌥)"),
     ("ctrl_alt_cmd", "Control+Option+Command chord (⌃⌥⌘)"),
 ]
 

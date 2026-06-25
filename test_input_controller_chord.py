@@ -74,30 +74,30 @@ def main() -> int:
     ic.mouse.Listener = StubListener
 
     app = StubApp()
-    controller = ic.InputController(app, hotkey_id="ctrl_alt_cmd")
+    controller = ic.InputController(app, hotkey_id="ctrl_shift_alt")
 
     ok &= check("hotkey resolves to chord mode", controller._chord_required is not None)
-    ok &= check("display name is the chord glyphs", controller.hotkey_name == "⌃⌥⌘")
+    ok &= check("display name is the chord glyphs", controller.hotkey_name == "⌃⇧⌥")
     ok &= check("watchdog mask requires all members", controller._trigger_flag_require_all is True)
 
-    # Hold the chord: ctrl, alt, then cmd completes it -> recording starts.
+    # Hold the chord: ctrl, shift, then alt completes it -> recording starts.
     controller._on_press(keyboard.Key.ctrl_l)
-    controller._on_press(keyboard.Key.alt_l)
+    controller._on_press(keyboard.Key.shift_l)
     ok &= check("not recording on partial chord", not app.started.is_set())
-    controller._on_press(keyboard.Key.cmd_l)
+    controller._on_press(keyboard.Key.alt_l)
     ok &= check("recording started on full chord", app.started.wait(2))
 
     # Release one member -> recording stops and processes.
-    controller._on_release(keyboard.Key.alt_l)
+    controller._on_release(keyboard.Key.shift_l)
     ok &= check("recording processed on release", app.processed.wait(2))
-    ok &= check("send_enter false (no shift held)", app.process_args is False)
+    ok &= check("send_enter false (shift is part of the trigger)", app.process_args is False)
 
-    # A non-chord key (esc) must not crash the chord path; left/right mix counts too.
+    # Left/right mix counts too (chord matches modifier families, not sides).
     app2 = StubApp()
-    c2 = ic.InputController(app2, hotkey_id="ctrl_alt_cmd")
+    c2 = ic.InputController(app2, hotkey_id="ctrl_shift_alt")
     c2._on_press(keyboard.Key.ctrl_r)   # right control
+    c2._on_press(keyboard.Key.shift_r)  # right shift
     c2._on_press(keyboard.Key.alt_r)    # right option
-    c2._on_press(keyboard.Key.cmd_r)    # right command
     ok &= check("right-side chord also starts recording", app2.started.wait(2))
 
     # Single-key mode still untouched: cmd_r alone triggers, chord state absent.

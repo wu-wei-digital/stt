@@ -29,6 +29,7 @@ HOTKEYS: dict[str, dict[str, object]] = {
 # Chord hotkeys: a set of modifier *families* that must all be held at once
 # (left/right agnostic). Handled by ChordMatcher rather than the single-key path.
 CHORD_HOTKEYS: dict[str, dict[str, object]] = {
+    "ctrl_shift_alt": {"families": frozenset({"ctrl", "shift", "alt"}), "name": "⌃⇧⌥"},
     "ctrl_alt_cmd": {"families": frozenset({"ctrl", "alt", "cmd"}), "name": "⌃⌥⌘"},
 }
 

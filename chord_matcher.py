@@ -25,7 +25,9 @@ class Action(Enum):
     STOP = "stop"
 
 
-# The families that make up Nicholas's Logitech F5 chord (Control+Option+Command).
+# Convenience constants for the registered chords. Nicholas's Logitech F5 key
+# emits Control+Shift+Option (⌃⇧⌥).
+REQUIRED_CTRL_SHIFT_ALT = frozenset({"ctrl", "shift", "alt"})
 REQUIRED_CTRL_ALT_CMD = frozenset({"ctrl", "alt", "cmd"})
 
 _MODES = ("hold", "toggle")
