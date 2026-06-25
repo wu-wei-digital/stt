@@ -402,7 +402,7 @@ def main() -> None:
         if "LANGUAGE" in changes:
             app.language = cfg.language
             print(f"   Language: {cfg.language}")
-        if "HOTKEY" in changes:
+        if "HOTKEY" in changes or "HOTKEY_MODE" in changes:
             controller.set_hotkey_id(cfg.hotkey)
             hotkey_name = HOTKEY_DISPLAY_NAMES.get(cfg.hotkey, cfg.hotkey)
             menubar.update_hotkey_name(hotkey_name)

@@ -30,6 +30,7 @@ class Config:
     audio_device: str = ""  # device name
     language: str = "en"
     hotkey: str = "cmd_r"
+    hotkey_mode: str = "hold"  # "hold" (push-to-talk) or "toggle"; only used by chord hotkeys
     prompt: str = ""
     sound_enabled: bool = True
     keep_recordings: bool = False
@@ -45,6 +46,7 @@ class Config:
             audio_device=os.environ.get("AUDIO_DEVICE", ""),
             language=os.environ.get("LANGUAGE", "en"),
             hotkey=os.environ.get("HOTKEY", "cmd_r"),
+            hotkey_mode=os.environ.get("HOTKEY_MODE", "hold"),
             prompt=os.environ.get("PROMPT", ""),
             sound_enabled=os.environ.get("SOUND_ENABLED", "true").lower() == "true",
             keep_recordings=os.environ.get("KEEP_RECORDINGS", "false").lower() == "true",
@@ -60,6 +62,7 @@ class Config:
             "AUDIO_DEVICE": self.audio_device,
             "LANGUAGE": self.language,
             "HOTKEY": self.hotkey,
+            "HOTKEY_MODE": self.hotkey_mode,
             "PROMPT": self.prompt,
             "SOUND_ENABLED": str(self.sound_enabled).lower(),
             "KEEP_RECORDINGS": str(self.keep_recordings).lower(),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -7,6 +8,7 @@ from typing import Optional
 
 from pynput import keyboard, mouse
 
+from chord_matcher import Action, ChordMatcher
 from prompt_overlay import PromptOverlay
 from stt_app import STTApp
 from text_injector import paste_text
@@ -22,6 +24,33 @@ HOTKEYS: dict[str, dict[str, object]] = {
     "shift_r": {"key": keyboard.Key.shift_r, "name": "Right ⇧"},
     "shift_l": {"key": keyboard.Key.shift_l, "name": "Left ⇧"},
 }
+
+
+# Chord hotkeys: a set of modifier *families* that must all be held at once
+# (left/right agnostic). Handled by ChordMatcher rather than the single-key path.
+CHORD_HOTKEYS: dict[str, dict[str, object]] = {
+    "ctrl_alt_cmd": {"families": frozenset({"ctrl", "alt", "cmd"}), "name": "⌃⌥⌘"},
+}
+
+
+# Map every concrete pynput modifier key to its family, built defensively so a
+# key name missing on this platform is simply skipped.
+_KEY_FAMILY: dict[object, str] = {}
+for _fam, _names in (
+    ("ctrl", ("ctrl", "ctrl_l", "ctrl_r")),
+    ("alt", ("alt", "alt_l", "alt_r", "alt_gr")),
+    ("cmd", ("cmd", "cmd_l", "cmd_r")),
+    ("shift", ("shift", "shift_l", "shift_r")),
+):
+    for _name in _names:
+        _k = getattr(keyboard.Key, _name, None)
+        if _k is not None:
+            _KEY_FAMILY[_k] = _fam
+
+
+def _family_of(key) -> Optional[str]:
+    """The modifier family (ctrl/alt/cmd/shift) for a key, or None if not a modifier."""
+    return _KEY_FAMILY.get(key)
 
 
 VK_TO_CHAR: dict[int, str] = {
@@ -81,7 +110,13 @@ class InputController:
         self._trigger_is_shift = False
         self._trigger_is_alt = False
         self._trigger_flag_mask = None
+        self._trigger_flag_require_all = False
         self._trigger_key_name = "Right ⌘"
+
+        # Chord mode: None for the single-key path, else a frozenset of required
+        # families driven by a ChordMatcher.
+        self._chord_required: Optional[frozenset] = None
+        self._chord_matcher: Optional[ChordMatcher] = None
 
         self._prompt_overlay = PromptOverlay(on_select=self._on_prompt_select)
         self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
@@ -100,6 +135,24 @@ class InputController:
 
     def set_hotkey_id(self, hotkey_id: str) -> None:
         with self._lock:
+            chord = CHORD_HOTKEYS.get(hotkey_id)
+            if chord:
+                families = chord["families"]  # type: ignore[assignment]
+                mode = os.environ.get("HOTKEY_MODE", "hold")
+                self._chord_required = families  # type: ignore[assignment]
+                self._chord_matcher = ChordMatcher(families, mode=mode)
+                self._trigger_key = None  # single-key paths stay dormant in chord mode
+                self._trigger_is_shift = False
+                self._trigger_is_alt = False
+                self._trigger_key_name = str(chord["name"])
+                self._app.hotkey_id = hotkey_id
+                self._trigger_flag_mask, self._trigger_flag_require_all = self._combined_flag_mask(families)
+                return
+
+            self._chord_required = None
+            self._chord_matcher = None
+            self._trigger_flag_require_all = False
+
             entry = HOTKEYS.get(hotkey_id)
             if entry:
                 self._trigger_key = entry["key"]  # type: ignore[assignment]
@@ -132,6 +185,36 @@ class InputController:
                     self._trigger_flag_mask = kCGEventFlagMaskControl
             except Exception:
                 self._trigger_flag_mask = None
+
+    @staticmethod
+    def _combined_flag_mask(families):
+        """OR the Quartz flag masks for a set of families. Returns (mask, require_all).
+
+        require_all is True so the watchdog treats the chord as released the moment
+        any one member is no longer held. (None, False) if Quartz is unavailable.
+        """
+        try:
+            from Quartz import (
+                kCGEventFlagMaskCommand,
+                kCGEventFlagMaskShift,
+                kCGEventFlagMaskAlternate,
+                kCGEventFlagMaskControl,
+            )
+        except Exception:
+            return None, False
+        fam_to_mask = {
+            "cmd": kCGEventFlagMaskCommand,
+            "shift": kCGEventFlagMaskShift,
+            "alt": kCGEventFlagMaskAlternate,
+            "ctrl": kCGEventFlagMaskControl,
+        }
+        mask = 0
+        for fam in families:
+            bit = fam_to_mask.get(fam)
+            if bit is None:
+                return None, False
+            mask |= bit
+        return mask, True
 
     def start(self) -> None:
         self._listener.start()
@@ -168,6 +251,33 @@ class InputController:
                 trigger_key = self._trigger_key
                 trigger_is_shift = self._trigger_is_shift
                 trigger_is_alt = self._trigger_is_alt
+                chord_required = self._chord_required
+
+            if chord_required is not None:
+                fam = _family_of(key)
+                if fam in chord_required:
+                    start = stop = False
+                    send_enter = False
+                    with self._lock:
+                        action = self._chord_matcher.press(fam)
+                        if action == Action.START and not self._key_pressed:
+                            self._key_pressed = True
+                            self._record_source = "keyboard"
+                            self._send_enter_flag = self._shift_held
+                            if self._send_enter_flag:
+                                self._app._overlay.set_shift_held(True)
+                            start = True
+                        elif action == Action.STOP and self._key_pressed:
+                            self._key_pressed = False
+                            send_enter = self._send_enter_flag
+                            self._send_enter_flag = False
+                            self._record_source = None
+                            stop = True
+                    if start:
+                        threading.Thread(target=self._app.start_recording, daemon=True).start()
+                    if stop:
+                        threading.Thread(target=self._app.process_recording, args=(send_enter,)).start()
+                    return
 
             if key == trigger_key:
                 with self._lock:
@@ -239,6 +349,24 @@ class InputController:
                 trigger_key = self._trigger_key
                 trigger_is_shift = self._trigger_is_shift
                 trigger_is_alt = self._trigger_is_alt
+                chord_required = self._chord_required
+
+            if chord_required is not None:
+                fam = _family_of(key)
+                if fam in chord_required:
+                    stop = False
+                    send_enter = False
+                    with self._lock:
+                        action = self._chord_matcher.release(fam)
+                        if action == Action.STOP and self._key_pressed:
+                            self._key_pressed = False
+                            send_enter = self._send_enter_flag
+                            self._send_enter_flag = False
+                            self._record_source = None
+                            stop = True
+                    if stop:
+                        threading.Thread(target=self._app.process_recording, args=(send_enter,)).start()
+                    return
 
             if key in (keyboard.Key.shift_l, keyboard.Key.shift_r):
                 with self._lock:
@@ -315,7 +443,12 @@ class InputController:
                     trigger_flag_mask = self._trigger_flag_mask
                     if trigger_flag_mask is None:
                         continue
-                    if CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState) & trigger_flag_mask:
+                    flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState)
+                    if self._trigger_flag_require_all:
+                        still_held = (flags & trigger_flag_mask) == trigger_flag_mask
+                    else:
+                        still_held = bool(flags & trigger_flag_mask)
+                    if still_held:
                         continue
                     now = time.time()
                     if now - last_forced < 1.0:
@@ -325,6 +458,8 @@ class InputController:
                     self._send_enter_flag = False
                     self._key_pressed = False
                     self._record_source = None
+                    if self._chord_matcher is not None:
+                        self._chord_matcher.reset()
                 threading.Thread(target=self._app.process_recording, args=(send_enter,), daemon=True).start()
 
         self._fallback_thread = threading.Thread(target=loop, daemon=True)

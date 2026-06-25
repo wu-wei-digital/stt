@@ -10,6 +10,7 @@ HOTKEY_DISPLAY_NAMES: dict[str, str] = {
     "ctrl_l": "Left ⌃",
     "shift_r": "Right ⇧",
     "shift_l": "Left ⇧",
+    "ctrl_alt_cmd": "⌃⌥⌘",
 }
 
 
