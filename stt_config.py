@@ -31,6 +31,7 @@ class Config:
     language: str = "en"
     hotkey: str = "cmd_r"
     hotkey_mode: str = "hold"  # "hold" (push-to-talk) or "toggle"; only used by chord hotkeys
+    mouse_trigger: bool = True  # middle-mouse-button starts/stops recording
     prompt: str = ""
     sound_enabled: bool = True
     keep_recordings: bool = False
@@ -47,6 +48,7 @@ class Config:
             language=os.environ.get("LANGUAGE", "en"),
             hotkey=os.environ.get("HOTKEY", "cmd_r"),
             hotkey_mode=os.environ.get("HOTKEY_MODE", "hold"),
+            mouse_trigger=os.environ.get("MOUSE_TRIGGER", "true").lower() == "true",
             prompt=os.environ.get("PROMPT", ""),
             sound_enabled=os.environ.get("SOUND_ENABLED", "true").lower() == "true",
             keep_recordings=os.environ.get("KEEP_RECORDINGS", "false").lower() == "true",
@@ -63,6 +65,7 @@ class Config:
             "LANGUAGE": self.language,
             "HOTKEY": self.hotkey,
             "HOTKEY_MODE": self.hotkey_mode,
+            "MOUSE_TRIGGER": str(self.mouse_trigger).lower(),
             "PROMPT": self.prompt,
             "SOUND_ENABLED": str(self.sound_enabled).lower(),
             "KEEP_RECORDINGS": str(self.keep_recordings).lower(),
@@ -246,7 +249,7 @@ class ConfigWatcher:
         for k, old_v in old.items():
             if old_v != new.get(k, ""):
                 # Preserve booleans for a couple of known keys.
-                if k in ("SOUND_ENABLED", "KEEP_RECORDINGS"):
+                if k in ("SOUND_ENABLED", "KEEP_RECORDINGS", "MOUSE_TRIGGER"):
                     changes[k] = new.get(k, "false").lower() == "true"
                 else:
                     changes[k] = new.get(k, "")

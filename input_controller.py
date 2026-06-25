@@ -119,6 +119,11 @@ class InputController:
         self._chord_required: Optional[frozenset] = None
         self._chord_matcher: Optional[ChordMatcher] = None
 
+        # Middle-mouse-button starts/stops recording. Some mice report their
+        # back/forward side buttons as middle, which fires dictation by accident,
+        # so this is switchable off (env MOUSE_TRIGGER, default on).
+        self._mouse_trigger_enabled = os.environ.get("MOUSE_TRIGGER", "true").lower() == "true"
+
         self._prompt_overlay = PromptOverlay(on_select=self._on_prompt_select)
         self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._mouse_listener = mouse.Listener(on_click=self._on_click)
@@ -403,7 +408,13 @@ class InputController:
                 self._send_enter_flag = False
                 self._record_source = None
 
+    def set_mouse_trigger_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self._mouse_trigger_enabled = bool(enabled)
+
     def _on_click(self, x, y, button, pressed):
+        if not self._mouse_trigger_enabled:
+            return
         if button != mouse.Button.middle:
             return
 

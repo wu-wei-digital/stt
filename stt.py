@@ -407,6 +407,9 @@ def main() -> None:
             hotkey_name = HOTKEY_DISPLAY_NAMES.get(cfg.hotkey, cfg.hotkey)
             menubar.update_hotkey_name(hotkey_name)
             print(f"   Hotkey: {hotkey_name}")
+        if "MOUSE_TRIGGER" in changes:
+            controller.set_mouse_trigger_enabled(cfg.mouse_trigger)
+            print(f"   Mouse trigger: {'on' if cfg.mouse_trigger else 'off'}")
         if "PROMPT" in changes:
             app.prompt = cfg.prompt
             print(f"   Prompt: {cfg.prompt or '(empty)'}")

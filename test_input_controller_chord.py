@@ -107,6 +107,27 @@ def main() -> int:
     c3._on_press(keyboard.Key.cmd_r)
     ok &= check("single-key cmd_r still starts recording", app3.started.wait(2))
 
+    # --- mouse-trigger gating ----------------------------------------------
+    from pynput import mouse as _mouse
+
+    os.environ["MOUSE_TRIGGER"] = "false"
+    app4 = StubApp()
+    c4 = ic.InputController(app4, hotkey_id="cmd_r")
+    c4._on_click(0, 0, _mouse.Button.middle, True)
+    ok &= check("mouse trigger off: middle click does not record", not app4.started.wait(0.3))
+
+    os.environ["MOUSE_TRIGGER"] = "true"
+    app5 = StubApp()
+    c5 = ic.InputController(app5, hotkey_id="cmd_r")
+    c5._on_click(0, 0, _mouse.Button.middle, True)
+    ok &= check("mouse trigger on: middle click records", app5.started.wait(2))
+
+    c5.set_mouse_trigger_enabled(False)
+    app5.started.clear()
+    c5._on_click(0, 0, _mouse.Button.middle, True)
+    ok &= check("mouse trigger live-disabled: middle click ignored", not app5.started.wait(0.3))
+    os.environ.pop("MOUSE_TRIGGER", None)
+
     time.sleep(0.05)
     print("\nAll passed." if ok else "\nSOME FAILED.")
     return 0 if ok else 1
