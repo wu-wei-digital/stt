@@ -44,6 +44,22 @@ START_TIMEOUT_S = 2.0
 FIRST_FRAME_TIMEOUT_S = float(os.environ.get("STT_FIRST_FRAME_TIMEOUT_S", "1.0"))
 
 
+def resample_to(audio, src_rate: int, dst_rate: int):
+    """Resample float32 audio (frames, or frames x channels) from src to dst rate.
+
+    Identity when the rates already match. Capturing at the device's native rate
+    and resampling here (rather than asking CoreAudio for a rate the device does
+    not run at) is what keeps a 48kHz mic from stalling after the first frame.
+    """
+    if src_rate == dst_rate or src_rate <= 0 or dst_rate <= 0:
+        return audio
+    from math import gcd
+    from scipy.signal import resample_poly
+
+    g = gcd(int(src_rate), int(dst_rate))
+    return resample_poly(audio, int(dst_rate) // g, int(src_rate) // g, axis=0)
+
+
 class Recorder:
     def __init__(self):
         self._recording = False
@@ -58,6 +74,7 @@ class Recorder:
         self._waveform_thread = None
         self._waveform_stop = None
         self._force_exit = False
+        self._target_rate = None  # model-facing output rate; capture is at the device's native rate
 
     def start(self, *, device_name: str | None, sample_rate: int, channels: int) -> None:
         if self._recording:
@@ -73,8 +90,21 @@ class Recorder:
             if device_index is None:
                 raise RuntimeError(f"Audio device '{device_name}' not found")
 
+        # Capture at the device's NATIVE rate. Asking CoreAudio for a rate the
+        # device does not run at (e.g. 16k from a 48k mic) opens a stream that
+        # delivers a frame then stalls. We resample to the target rate in stop().
+        capture_rate = sample_rate
+        try:
+            info = sd.query_devices(device_index) if device_index is not None else sd.query_devices(kind="input")
+            native = int(round(float(info["default_samplerate"])))
+            if native > 0:
+                capture_rate = native
+        except Exception:
+            capture_rate = sample_rate
+
         self._chunks = []
-        self._sample_rate = sample_rate
+        self._target_rate = sample_rate
+        self._sample_rate = capture_rate
         self._channels = channels
         self._recording = True
         self._waveform_buffer = []
@@ -97,7 +127,7 @@ class Recorder:
             try:
                 stream = sd.InputStream(
                     device=device_index,
-                    samplerate=sample_rate,
+                    samplerate=capture_rate,
                     channels=channels,
                     dtype=np.float32,
                     callback=callback,
@@ -264,11 +294,14 @@ class Recorder:
         from scipy.io import wavfile
 
         audio = np.concatenate(chunks, axis=0)
+        capture_rate = int(self._sample_rate or 16000)
+        target_rate = int(self._target_rate or capture_rate)
+        audio = resample_to(audio, capture_rate, target_rate)
         frames = int(audio.shape[0])
         peak = float(np.max(np.abs(audio)))
 
         audio_int16 = (audio * 32767).astype(np.int16)
-        wavfile.write(wav_path, int(self._sample_rate or 16000), audio_int16)
+        wavfile.write(wav_path, target_rate, audio_int16)
         return frames, peak
 
     def cancel(self) -> None:
