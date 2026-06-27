@@ -120,6 +120,13 @@ def _select_audio_device(*, saved_device_name: str, save_device_fn) -> str | Non
                 return saved_device_name
         print(f"⚠️  Saved device '{saved_device_name}' not found, please select again")
 
+    # Headless (launchd / no controlling terminal): we cannot run the interactive
+    # picker below, so fall back to the system default input device. A specific
+    # device can still be set via AUDIO_DEVICE (handled by the saved-device path above).
+    if not sys.stdin.isatty():
+        print("No interactive terminal; using the system default input device.")
+        return None
+
     print("\nAvailable input devices:")
     for i, dev in input_devices:
         marker = "*" if i == sd.default.device[0] else " "
